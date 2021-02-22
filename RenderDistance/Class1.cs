@@ -13,11 +13,16 @@ using UnityEngine.EventSystems;
 
 namespace DSP_RenderDistance
 {
-    [BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.5.0")]
+    [BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.0")]
     public class DSP_RenderDistance : BaseUnityPlugin
     {
 
 		internal static GameObject dofblur, dofblurSlider, farRender, farRenderSlider;
+		internal static PlanetData remoteViewPlanet;
+		internal static int origPlanetId = -1;
+
+		internal static Vector3 origPosVec3 = Vector3.zero;
+		internal static VectorLF3 origPos = VectorLF3.zero;
 
         public void Awake()
         {
@@ -26,25 +31,189 @@ namespace DSP_RenderDistance
 
         }
 
-		[HarmonyPostfix, HarmonyPatch(typeof(UIOptionWindow), "_OnUpdate")]
-		public static void patch__OnUpdate(UIOptionWindow __instance)
+		private static void tpPlayer(PlanetData dest, bool hidePlayer)
         {
 
-			if(farRenderSlider != null)
+            if (!hidePlayer)
             {
-				
+				GameMain.data.mainPlayer.uPosition = origPos;
+				GameMain.data.mainPlayer.position = origPosVec3;
+            }
+            else
+            {
+				GameMain.data.mainPlayer.uPosition = dest.uPosition + VectorLF3.unit_z * (double)dest.realRadius;
+			}
+			GameMain.data.mainPlayer.transform.localScale = Vector3.one;
+			GameMain.data.hidePlayerModel = hidePlayer;
+
+			GameMain.data.ArrivePlanet(dest);
+			GameMain.universeSimulator.GameTick(0.0);
+			GameCamera.instance.FrameLogic();
+
+		}
+
+		private static int findPlanet(int id, StarData star)
+        {
+
+			for(int i = 0; i < star.planetCount; i++)
+            {
+				if(star.planets[i].id == id)
+                {
+					return i;
+                }
+            }
+
+			return -1;
+
+        }
+
+		[HarmonyPostfix, HarmonyPatch(typeof(PlayerController), "UpdatePhysicsDirect")]
+		public static void patch_UpdatePhysicsDirect(PlayerController __instance)
+		{
+
+			if (origPos != VectorLF3.zero && origPosVec3 != Vector3.zero && origPlanetId != -1)
+			{
+
+				int planetIndex = findPlanet(origPlanetId, GameMain.data.localStar);
+				if(planetIndex != -1)
+                {
+
+					VectorLF3 relativePos;
+					Quaternion relativeRot;
+					PlanetData origPlanet = GameMain.data.localStar.planets[planetIndex];
+
+					relativePos.x = origPlanet.uPosition.x;
+					relativePos.y = origPlanet.uPosition.y;
+					relativePos.z = origPlanet.uPosition.z;
+					relativeRot.x = origPlanet.runtimeRotation.x;
+					relativeRot.y = origPlanet.runtimeRotation.y;
+					relativeRot.z = origPlanet.runtimeRotation.z;
+					relativeRot.w = origPlanet.runtimeRotation.w;
+
+					origPos = relativePos + Maths.QRotateLF(relativeRot, origPosVec3);
+
+				}
+
+			}
+
+		}
+
+		[HarmonyPostfix, HarmonyPatch(typeof(UIStarmap), "OnPlanetClick")]
+		public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet planet)
+        {
+
+			UIGame ui = UIRoot.instance.uiGame;
+			if (ui != null && planet.planet != null)
+            {
+
+				remoteViewPlanet = planet.planet;
+				origPlanetId = GameMain.data.localPlanet.id;
+
+				origPos = GameMain.data.mainPlayer.uPosition;
+				origPosVec3 = GameMain.data.mainPlayer.position;
+
+				tpPlayer(planet.planet, true);
+
+				__instance._OnClose();
+				ui.globemap.FadeIn();
+
+            }
+			
+        }
+
+		[HarmonyPostfix, HarmonyPatch(typeof(UIGlobemap), "_OnClose")]
+		public static void patch__OnClose()
+        {
+
+			if (origPlanetId != -1)
+			{
+
+				Player mainPlayer = Traverse.Create(GameMain.data).Property("mainPlayer").GetValue<Player>();
+
+				if (mainPlayer != null)
+				{
+
+					StarData localStar = Traverse.Create(GameMain.data).Property("localStar").GetValue<StarData>();
+
+					if (localStar != null)
+					{
+
+						for (int i = 0; i < localStar.planetCount; i++)
+						{
+							if (localStar.planets[i].id == origPlanetId)
+							{
+
+								tpPlayer(localStar.planets[i], false);
+
+								break;
+							}
+
+						}
+
+					}
+
+				}
+
+				origPlanetId = -1;
+				remoteViewPlanet = null;
+
+				origPos = VectorLF3.zero;
+				origPosVec3 = Vector3.zero;
+
+			}
+
+		}
+
+		[HarmonyPostfix, HarmonyPatch(typeof(UIGlobemap), "FadeIn")]
+		public static void patch_FadeIn()
+        {
+
+			Traverse.Create(GameMain.data).Property("localPlanet").GetValue<PlanetData>().LoadFactory();
+
+        }
+
+		[HarmonyPrefix, HarmonyPatch(typeof(GameData), "LeavePlanet")]
+		public static bool patch_LeavePlanet(GameData __instance)
+        {
+
+			if (__instance.localPlanet != null)
+			{
+				__instance.localPlanet.UnloadFactory();
+				__instance.localPlanet.onLoaded -= __instance.OnActivePlanetLoaded;
+				__instance.localPlanet.onFactoryLoaded -= __instance.OnActivePlanetFactoryLoaded;
+				if(origPlanetId == -1)
+                {
+					__instance.localPlanet = null;
+				}
+			}
+			if(origPlanetId == -1)
+            {
+				__instance.mainPlayer.planetId = 0;
+			}
+
+			return false;
+
+		}
+
+		[HarmonyPostfix, HarmonyPatch(typeof(UIOptionWindow), "_OnUpdate")]
+		public static void patch__OnUpdate(UIOptionWindow __instance)
+		{
+
+			if (farRenderSlider != null)
+			{
+
 				UnityEngine.UI.Slider slider = farRenderSlider.GetComponent<Slider>();
 
-				if(slider.value == 0)
-                {
+				if (slider.value == 0)
+				{
 					slider.value = 1;
-                }
+				}
 
 				farRenderSlider.GetComponentInChildren<Text>().text = ((float)slider.value / 10f).ToString("0.0");
 
 			}
 
-        }
+		}
 
 		// much thanks to https://github.com/fezhub/DSP-Mods/blob/main/DSP_SphereProgress/SphereProgress.cs
 		[HarmonyPostfix, HarmonyPatch(typeof(UIOptionWindow), "_OnOpen")]
@@ -65,18 +234,21 @@ namespace DSP_RenderDistance
 					child.transform.SetParent(dofblurSlider.transform.parent);
                 }
 				farRender.transform.localScale = new Vector3(1f, 1f, 1f);
-				farRender.transform.position = new Vector3(-8.43f, 49.7f, 0f);
-				farRender.transform.localPosition = new Vector3(-850f, 10.0f, 0f);
+
+				Vector3 farRenderPos = farRender.transform.position;
+				farRenderPos.y -= 0.4f;
+
+				farRender.transform.position = farRenderPos;
 
 				farRenderSlider = Instantiate(dofblurSlider, dofblurSlider.transform.position, Quaternion.identity);
 				farRenderSlider.name = "Slider";
 				farRenderSlider.transform.SetParent(farRender.transform);
 				farRenderSlider.transform.localScale = new Vector3(1f, 1f, 1f);
-				farRenderSlider.transform.position = new Vector3(-5.95f, 50f, 0f);
-				farRenderSlider.transform.localPosition = new Vector3(250f, -23.0f, 0f);
+				farRenderSlider.transform.position = dofblurSlider.transform.position;
+				farRenderSlider.transform.localPosition = dofblurSlider.transform.localPosition;
 
 				UnityEngine.UI.Slider slider = farRenderSlider.GetComponent<Slider>();
-				slider.maxValue = 4f * 10; // can only set whole numbers, so devide by 10 to get float value back
+				slider.maxValue = 10f * 10; // can only set whole numbers, so devide by 10 to get float value back
 				slider.value = 10.0f;
 				//slider.stepSize = 0.1f; // does not work as its write protected
 
@@ -167,17 +339,34 @@ namespace DSP_RenderDistance
 				}
 
 				int num6 = 0;
+				PlanetData fallbackGas = null;
 				while (nearestStar != null && num6 < nearestStar.planetCount)
 				{
 					double num7 = (__instance.mainPlayer.uPosition - nearestStar.planets[num6].uPosition).magnitude - (double)nearestStar.planets[num6].realRadius;
 					if (num7 < num5)
 					{
-						nearestPlanet = nearestStar.planets[num6];
-						num5 = num7;
+                        if (nearestStar.planets[num6].type == EPlanetType.Gas && num7 > 500)
+                        {
+							fallbackGas = nearestStar.planets[num6];
+                        }
+                        else
+                        {
+							nearestPlanet = nearestStar.planets[num6];
+							num5 = num7;
+						}
 					}
 					num6++;
 				}
+				if(nearestPlanet == null && fallbackGas != null)
+                {
+					nearestPlanet = fallbackGas; // to prevent ping pong loading between starter and orbiting gas planet when between them. favor home planet.
+                }
 			}
+
+			if(remoteViewPlanet != null)
+            {
+				nearestPlanet = remoteViewPlanet;
+            }
 
 			return false;
 
