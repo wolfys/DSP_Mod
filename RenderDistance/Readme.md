@@ -21,3 +21,6 @@ It will also allow you to view remote planets in the current solar system in Pla
 - render priority of gas planets is the lowest now.
 - added a feature to view remote planets in Planet View mode
 - <b>known bug:</b> viewing remote planets may change icarus size a little bit.
+
+### 0.6.1
+- fixed a bug that would teleport the player to a remote planet. (thanks to cdeath-zz for finding and reporting it)
