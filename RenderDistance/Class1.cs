@@ -13,7 +13,7 @@ using UnityEngine.EventSystems;
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.1")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.2")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
@@ -23,6 +23,11 @@ internal static int origPlanetId = -1;
 
 internal static Vector3 origPosVec3 = Vector3.zero;
 internal static VectorLF3 origPos = VectorLF3.zero;
+
+internal static Quaternion origRot = new Quaternion(0, 0, 0, 0);
+internal static VectorLF3 origVelocity = VectorLF3.zero;
+
+internal static bool needUpdateRot = false;
 
 public void Awake()
 {
@@ -46,7 +51,17 @@ private static void tpPlayer(PlanetData dest, bool hidePlayer)
         GameMain.data.mainPlayer.transform.localScale = Vector3.one;
         GameMain.data.hidePlayerModel = hidePlayer;
 
-        GameMain.data.ArrivePlanet(dest);
+        if(dest != null)
+        {
+                GameMain.data.ArrivePlanet(dest);
+        }
+        else
+        {
+                needUpdateRot = true;
+                // this is crucial because of PlayerController::LateUpdate()
+                // it would reset the location back to the remote planet and leave the player there
+                GameMain.data.mainPlayer.controller.actionSail.sailCounter = 5;
+        }
         GameMain.universeSimulator.GameTick(0.0);
         GameCamera.instance.FrameLogic();
 
@@ -64,6 +79,27 @@ private static int findPlanet(int id, StarData star)
         }
 
         return -1;
+
+}
+
+[HarmonyPrefix, HarmonyPatch(typeof(PlayerController), "UpdateRotation")]
+public static bool patch_UpdateRotation(PlayerController __instance)
+{
+
+        if (needUpdateRot)
+        {
+                __instance.player.uRotation = origRot;
+                __instance.player.uVelocity = origVelocity;
+                needUpdateRot = false;
+
+                Debug.Log(__instance.player.uRotation + " (" + __instance.uRotationWanted + ") (reset) orig: " + origRot);
+
+                return false;
+        }
+
+        Debug.Log(__instance.player.uRotation + " (" + __instance.uRotationWanted + ")");
+
+        return true;
 
 }
 
@@ -95,6 +131,12 @@ public static void patch_UpdatePhysicsDirect(PlayerController __instance)
                 }
 
         }
+        else if(origPos != VectorLF3.zero && origPlanetId == -1)
+        {
+
+                origPos = origPos + Maths.QRotateLF(origRot, origPosVec3);
+
+        }
 
 }
 
@@ -107,12 +149,20 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
         {
 
                 remoteViewPlanet = planet.planet;
-                if(origPlanetId == -1)
+                if(origPlanetId == -1 && GameMain.data.localPlanet != null)
                 {
                         origPlanetId = GameMain.data.localPlanet.id;
 
                         origPos = GameMain.data.mainPlayer.uPosition;
                         origPosVec3 = GameMain.data.mainPlayer.position;
+                }
+                else if(origPlanetId == -1)
+                {
+                        origPos = GameMain.data.mainPlayer.uPosition;
+                        origPosVec3 = GameMain.data.mainPlayer.position;
+
+                        origRot = GameMain.data.mainPlayer.uRotation;
+                        origVelocity = GameMain.data.mainPlayer.uVelocity;
                 }
 
                 tpPlayer(planet.planet, true);
@@ -128,42 +178,42 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
 public static void patch__OnClose()
 {
 
-        if (origPlanetId != -1)
+        Player mainPlayer = Traverse.Create(GameMain.data).Property("mainPlayer").GetValue<Player>();
+
+        if (mainPlayer != null)
         {
 
-                Player mainPlayer = Traverse.Create(GameMain.data).Property("mainPlayer").GetValue<Player>();
+                StarData localStar = Traverse.Create(GameMain.data).Property("localStar").GetValue<StarData>();
 
-                if (mainPlayer != null)
+                if (localStar != null && origPlanetId != -1)
                 {
 
-                        StarData localStar = Traverse.Create(GameMain.data).Property("localStar").GetValue<StarData>();
-
-                        if (localStar != null)
+                        for (int i = 0; i < localStar.planetCount; i++)
                         {
-
-                                for (int i = 0; i < localStar.planetCount; i++)
+                                if (localStar.planets[i].id == origPlanetId)
                                 {
-                                        if (localStar.planets[i].id == origPlanetId)
-                                        {
 
-                                                tpPlayer(localStar.planets[i], false);
+                                        tpPlayer(localStar.planets[i], false);
 
-                                                break;
-                                        }
-
+                                        break;
                                 }
 
                         }
 
                 }
-
-                origPlanetId = -1;
-                remoteViewPlanet = null;
-
-                origPos = VectorLF3.zero;
-                origPosVec3 = Vector3.zero;
+                else if (origPlanetId == -1)
+                {
+                        Debug.Log("using patched tp");
+                        tpPlayer(null, false);
+                }
 
         }
+
+        origPlanetId = -1;
+        remoteViewPlanet = null;
+
+        origPos = VectorLF3.zero;
+        origPosVec3 = Vector3.zero;
 
 }
 
@@ -184,12 +234,12 @@ public static bool patch_LeavePlanet(GameData __instance)
                 __instance.localPlanet.UnloadFactory();
                 __instance.localPlanet.onLoaded -= __instance.OnActivePlanetLoaded;
                 __instance.localPlanet.onFactoryLoaded -= __instance.OnActivePlanetFactoryLoaded;
-                if(origPlanetId == -1)
+                if(origPlanetId == -1 && origPos == VectorLF3.zero)
                 {
                         __instance.localPlanet = null;
                 }
         }
-        if(origPlanetId == -1)
+        if(origPlanetId == -1 && origPos == VectorLF3.zero)
         {
                 __instance.mainPlayer.planetId = 0;
         }
@@ -213,6 +263,10 @@ public static void patch__OnUpdate(UIOptionWindow __instance)
                 }
 
                 farRenderSlider.GetComponentInChildren<Text>().text = ((float)slider.value / 10f).ToString("0.0");
+                if(farRender != null)
+                {
+                        farRender.GetComponent<Text>().text = "Planet Render Distance Multiplier";
+                }
 
         }
 
