@@ -31,3 +31,6 @@ It will also allow you to view remote planets in the current solar system in Pla
 
 ### 0.6.3
 - fixed the debug message spam, sorry!
+
+### 0.6.4
+- fixed a bug that would teleport you next to the sun when opening planet view "the normal way" and then pressing esc. (thanks to Nordblum for reporting and testing)
