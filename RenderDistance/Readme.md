@@ -26,5 +26,8 @@ It will also allow you to view remote planets in the current solar system in Pla
 - fixed a bug that would teleport the player to a remote planet. (thanks to cdeath-zz for finding and reporting it)
 
 ### 0.6.2
-- fixed a bug that prevented Planet View mode on remote planets while in space ( thanks to cdeath-zz for reporting it)
+- fixed a bug that prevented Planet View mode on remote planets while in space (thanks to cdeath-zz and GreyHak for reporting it)
 - fixed a visual bug in the settings (thanks to Taki7o7 for reporting this to me)
+
+### 0.6.3
+- fixed the debug message spam, sorry!
