@@ -13,7 +13,7 @@ using UnityEngine.EventSystems;
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.4")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.5")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
@@ -140,19 +140,25 @@ public static void patch_UpdatePhysicsDirect(PlayerController __instance)
 public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet planet)
 {
 
+        if(GameMain.data.mainPlayer.mecha.idleDroneCount != GameMain.data.mainPlayer.mecha.droneCount)
+        {
+                UIMessageBox.Show("Please wait!", "Your building drones have not yet returned, please wait before you use the remote planet view feature!", "Close", 3);
+                return;
+        }
+
         UIGame ui = UIRoot.instance.uiGame;
         if (ui != null && planet.planet != null)
         {
 
                 remoteViewPlanet = planet.planet;
-                if(origPlanetId == -1 && GameMain.data.localPlanet != null)
+                if(origPlanetId == -1 && GameMain.data.localPlanet != null && origPos == VectorLF3.zero)
                 {
                         origPlanetId = GameMain.data.localPlanet.id;
 
                         origPos = GameMain.data.mainPlayer.uPosition;
                         origPosVec3 = GameMain.data.mainPlayer.position;
                 }
-                else if(origPlanetId == -1)
+                else if(origPos == VectorLF3.zero)
                 {
                         origPos = GameMain.data.mainPlayer.uPosition;
                         origPosVec3 = GameMain.data.mainPlayer.position;

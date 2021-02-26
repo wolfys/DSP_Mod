@@ -34,3 +34,7 @@ It will also allow you to view remote planets in the current solar system in Pla
 
 ### 0.6.4
 - fixed a bug that would teleport you next to the sun when opening planet view "the normal way" and then pressing esc. (thanks to Nordblum for reporting and testing)
+
+### 0.6.5
+- fixed a bug that would teleport you to a remote planet when opening planet view mode on a remote planet repeatedly while in space.
+- prevent remote planet view mode when construction drones are still working. (thanks to cdeath-zz for reporting)
