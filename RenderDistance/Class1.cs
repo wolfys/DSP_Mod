@@ -13,7 +13,7 @@ using UnityEngine.EventSystems;
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.5")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.6")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
@@ -48,8 +48,6 @@ private static void tpPlayer(PlanetData dest, bool hidePlayer)
         {
                 GameMain.data.mainPlayer.uPosition = dest.uPosition + VectorLF3.unit_z * (double)dest.realRadius;
         }
-        GameMain.data.mainPlayer.transform.localScale = Vector3.one;
-        GameMain.data.hidePlayerModel = hidePlayer;
 
         if(dest != null)
         {
@@ -62,6 +60,9 @@ private static void tpPlayer(PlanetData dest, bool hidePlayer)
                 // it would reset the location back to the remote planet and leave the player there
                 GameMain.data.mainPlayer.controller.actionSail.sailCounter = 5;
         }
+        GameMain.data.mainPlayer.transform.localScale = Vector3.one;
+        GameMain.data.hidePlayerModel = hidePlayer;
+
         GameMain.universeSimulator.GameTick(0.0);
         GameCamera.instance.FrameLogic();
 
@@ -70,9 +71,9 @@ private static void tpPlayer(PlanetData dest, bool hidePlayer)
 private static int findPlanet(int id, StarData star)
 {
 
-        for(int i = 0; i < star.planetCount; i++)
+        for (int i = 0; i < star.planetCount; i++)
         {
-                if(star.planets[i].id == id)
+                if (star.planets[i].id == id)
                 {
                         return i;
                 }
