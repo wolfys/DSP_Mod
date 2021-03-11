@@ -7,13 +7,15 @@ using System.Security.Permissions;
 using System.Collections.Generic;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using System.Reflection.Emit;
+using System.Reflection;
 
 [module: UnverifiableCode]
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.6")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.7")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
@@ -28,6 +30,8 @@ internal static Quaternion origRot = new Quaternion(0, 0, 0, 0);
 internal static VectorLF3 origVelocity = VectorLF3.zero;
 
 internal static bool needUpdateRot = false;
+
+internal static double mechaEnergy = 0;
 
 public void Awake()
 {
@@ -80,6 +84,38 @@ private static int findPlanet(int id, StarData star)
         }
 
         return -1;
+
+}
+
+[HarmonyTranspiler, HarmonyPatch(typeof(PlayerOrder), "GameTick")]
+public static IEnumerable<CodeInstruction> patch_PlayerOrder_GameTick(IEnumerable<CodeInstruction> instructions)
+{
+
+        instructions = new CodeMatcher(instructions)
+                       .MatchForward(false,
+                                     new CodeMatch(OpCodes.Ldarg_0),
+                                     new CodeMatch(OpCodes.Ldfld),
+                                     new CodeMatch(i => i.opcode == OpCodes.Callvirt && ((MethodInfo)i.operand).Name == "get_factory"),
+                                     new CodeMatch(OpCodes.Stloc_0))
+                       .Advance(3)
+                       //.RemoveInstruction()
+                       .Insert(Transpilers.EmitDelegate<Func<PlanetFactory,PlanetFactory> >(pFactory =>
+                        {
+                                if (origPlanetId == -1)
+                                {
+                                        return GameMain.mainPlayer.factory;
+                                }
+                                else
+                                {
+                                        if (GameMain.mainPlayer.orders.currentOrder != null)
+                                        {
+                                                GameMain.mainPlayer.mecha.coreEnergy = mechaEnergy;
+                                        }
+                                        return GameMain.galaxy.PlanetById(origPlanetId).factory;
+                                }
+                        })).InstructionEnumeration();
+
+        return instructions;
 
 }
 
@@ -151,6 +187,11 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
         if (ui != null && planet.planet != null)
         {
 
+                if(GameMain.mainPlayer.orders.currentOrder != null)
+                {
+                        mechaEnergy = GameMain.mainPlayer.mecha.coreEnergy;
+                }
+
                 remoteViewPlanet = planet.planet;
                 if(origPlanetId == -1 && GameMain.data.localPlanet != null && origPos == VectorLF3.zero)
                 {
@@ -211,12 +252,25 @@ public static void patch__OnClose()
 
         }
 
-        origPlanetId = -1;
-        remoteViewPlanet = null;
+}
 
-        origPos = VectorLF3.zero;
-        origPosVec3 = Vector3.zero;
+[HarmonyPostfix, HarmonyPatch(typeof(PlanetData), "NotifyFactoryLoaded")]
+public static void patch_NotifyFactoryLoaded(PlanetData __instance)
+{
+        if(__instance.id == origPlanetId)
+        {
+                origPlanetId = -1;
+                remoteViewPlanet = null;
 
+                origPos = VectorLF3.zero;
+                origPosVec3 = Vector3.zero;
+
+                if(GameMain.mainPlayer.orders.currentOrder != null)
+                {
+                        GameMain.mainPlayer.mecha.coreEnergy = mechaEnergy;
+                        mechaEnergy = 0;
+                }
+        }
 }
 
 [HarmonyPostfix, HarmonyPatch(typeof(UIGlobemap), "FadeIn")]
@@ -314,8 +368,6 @@ public static void patch_OnOpen(UIOptionWindow __instance)
                 farRenderSlider.GetComponentInChildren<Text>().text = ((float)slider.value / 10f).ToString("0.0");
                 farRender.GetComponent<Text>().text = "Planet Render Distance Multiplier";
 
-                Debug.Log("injected UI into settings");
-
         }
         else if(farRender != null && farRenderSlider != null)
         {
@@ -324,12 +376,6 @@ public static void patch_OnOpen(UIOptionWindow __instance)
                 farRenderSlider.GetComponentInChildren<Text>().text = ((float)slider.value / 10f).ToString("0.0");
                 farRender.GetComponent<Text>().text = "Planet Render Distance Multiplier";
 
-                Debug.Log("re-injected UI into settings");
-
-        }
-        else
-        {
-                Debug.Log("could not inject UI into settings");
         }
 
 }

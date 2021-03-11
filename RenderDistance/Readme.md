@@ -41,3 +41,6 @@ It will also allow you to view remote planets in the current solar system in Pla
 
 ### 0.6.6
 - fixed a bug that would increase or decrease icarus size after returning from remote planet view mode. (Thanks GreyHak and Nordblum)
+
+### 0.6.7
+- fixed a bug that produced an error when you were in remote planet view while mining something by hand. (thanks cdeath-zz for reporting and testing)
