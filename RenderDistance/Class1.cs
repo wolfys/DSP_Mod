@@ -9,13 +9,14 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using System.Reflection.Emit;
 using System.Reflection;
+using BepInEx.Configuration;
 
 [module: UnverifiableCode]
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.7")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.8")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
@@ -31,12 +32,22 @@ internal static VectorLF3 origVelocity = VectorLF3.zero;
 
 internal static bool needUpdateRot = false;
 
-internal static double mechaEnergy = 0;
+internal static EMovementState origMoveState = EMovementState.Walk;
+internal static OrderNode currentOrder = null;
+
+public static ConfigEntry<float> RenderDistConfEntry {
+        get; set;
+}
 
 public void Awake()
 {
 
         Harmony.CreateAndPatchAll(typeof(DSP_RenderDistance));
+        RenderDistConfEntry = Config.Bind<float>(
+                "RenderDistanceMultiplier",
+                "Multiplier",
+                1.0f,
+                "The multiplier to use for planet render distance");
 
 }
 
@@ -66,6 +77,10 @@ private static void tpPlayer(PlanetData dest, bool hidePlayer)
         }
         GameMain.data.mainPlayer.transform.localScale = Vector3.one;
         GameMain.data.hidePlayerModel = hidePlayer;
+        if(origMoveState != EMovementState.Walk)
+        {
+                GameMain.mainPlayer.movementState = origMoveState;
+        }
 
         GameMain.universeSimulator.GameTick(0.0);
         GameCamera.instance.FrameLogic();
@@ -98,7 +113,6 @@ public static IEnumerable<CodeInstruction> patch_PlayerOrder_GameTick(IEnumerabl
                                      new CodeMatch(i => i.opcode == OpCodes.Callvirt && ((MethodInfo)i.operand).Name == "get_factory"),
                                      new CodeMatch(OpCodes.Stloc_0))
                        .Advance(3)
-                       //.RemoveInstruction()
                        .Insert(Transpilers.EmitDelegate<Func<PlanetFactory,PlanetFactory> >(pFactory =>
                         {
                                 if (origPlanetId == -1)
@@ -107,16 +121,32 @@ public static IEnumerable<CodeInstruction> patch_PlayerOrder_GameTick(IEnumerabl
                                 }
                                 else
                                 {
-                                        if (GameMain.mainPlayer.orders.currentOrder != null)
-                                        {
-                                                GameMain.mainPlayer.mecha.coreEnergy = mechaEnergy;
-                                        }
                                         return GameMain.galaxy.PlanetById(origPlanetId).factory;
                                 }
                         })).InstructionEnumeration();
 
         return instructions;
 
+}
+
+[HarmonyPrefix, HarmonyPatch(typeof(PlayerOrder), "Enqueue")]
+public static bool patch_Enqueue()
+{
+        if(currentOrder != null)
+        {
+                return false;
+        }
+        return true;
+}
+
+[HarmonyPrefix, HarmonyPatch(typeof(PlayerFootsteps), "PlayFootstepEffect")]
+public static bool patch_PlayFootstepEffect()
+{
+        if(currentOrder != null)
+        {
+                return false;
+        }
+        return true;
 }
 
 [HarmonyPrefix, HarmonyPatch(typeof(PlayerController), "UpdateRotation")]
@@ -187,20 +217,21 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
         if (ui != null && planet.planet != null)
         {
 
-                if(GameMain.mainPlayer.orders.currentOrder != null)
+                OrderNode order = GameMain.mainPlayer.orders.currentOrder;
+                if (order != null && (order.type == EOrderType.Mine || (order.type == EOrderType.Move && GameMain.mainPlayer.movementState == EMovementState.Walk)))
                 {
-                        mechaEnergy = GameMain.mainPlayer.mecha.coreEnergy;
+                        currentOrder = order;
+                        GameMain.mainPlayer.orders.currentOrder = null;
                 }
 
-                remoteViewPlanet = planet.planet;
-                if(origPlanetId == -1 && GameMain.data.localPlanet != null && origPos == VectorLF3.zero)
+                if(origPlanetId == -1 && GameMain.data.localPlanet != null && origPos == VectorLF3.zero && GameMain.mainPlayer.movementState != EMovementState.Sail)
                 {
                         origPlanetId = GameMain.data.localPlanet.id;
 
                         origPos = GameMain.data.mainPlayer.uPosition;
                         origPosVec3 = GameMain.data.mainPlayer.position;
                 }
-                else if(origPos == VectorLF3.zero)
+                else if(origPos == VectorLF3.zero && GameMain.data.localPlanet == null)
                 {
                         origPos = GameMain.data.mainPlayer.uPosition;
                         origPosVec3 = GameMain.data.mainPlayer.position;
@@ -208,6 +239,16 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
                         origRot = GameMain.data.mainPlayer.uRotation;
                         origVelocity = GameMain.data.mainPlayer.uVelocity;
                 }
+                else if(origPos == VectorLF3.zero && GameMain.data.localPlanet != null)
+                {
+                        UIMessageBox.Show("Im so sorry!", "Due to a teleportation bug i prevent you from using \"remote planet view\" when sailing near a planet, sorry for the inconvenience!\n" +
+                                          "\nI may will try to fix this issue in the future if i find the time to do so.\n" +
+                                          "\nHope you enjoy the game C:", "Close", 3);
+                        return;
+                }
+
+                remoteViewPlanet = planet.planet;
+                origMoveState = GameMain.mainPlayer.movementState;
 
                 tpPlayer(planet.planet, true);
 
@@ -222,12 +263,12 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
 public static void patch__OnClose()
 {
 
-        Player mainPlayer = Traverse.Create(GameMain.data).Property("mainPlayer").GetValue<Player>();
+        Player mainPlayer = GameMain.mainPlayer;
 
         if (mainPlayer != null)
         {
 
-                StarData localStar = Traverse.Create(GameMain.data).Property("localStar").GetValue<StarData>();
+                StarData localStar = GameMain.data.localStar;
 
                 if (localStar != null && origPlanetId != -1)
                 {
@@ -236,7 +277,6 @@ public static void patch__OnClose()
                         {
                                 if (localStar.planets[i].id == origPlanetId)
                                 {
-
                                         tpPlayer(localStar.planets[i], false);
 
                                         break;
@@ -250,6 +290,17 @@ public static void patch__OnClose()
                         tpPlayer(null, false);
                 }
 
+                if (currentOrder != null)
+                {
+                        GameMain.mainPlayer.orders.currentOrder = currentOrder;
+                        currentOrder = null;
+                }
+
+                remoteViewPlanet = null;
+
+                origPos = VectorLF3.zero;
+                origPosVec3 = Vector3.zero;
+
         }
 
 }
@@ -260,16 +311,6 @@ public static void patch_NotifyFactoryLoaded(PlanetData __instance)
         if(__instance.id == origPlanetId)
         {
                 origPlanetId = -1;
-                remoteViewPlanet = null;
-
-                origPos = VectorLF3.zero;
-                origPosVec3 = Vector3.zero;
-
-                if(GameMain.mainPlayer.orders.currentOrder != null)
-                {
-                        GameMain.mainPlayer.mecha.coreEnergy = mechaEnergy;
-                        mechaEnergy = 0;
-                }
         }
 }
 
@@ -324,6 +365,8 @@ public static void patch__OnUpdate(UIOptionWindow __instance)
                         farRender.GetComponent<Text>().text = "Planet Render Distance Multiplier";
                 }
 
+                RenderDistConfEntry.Value = ((float)slider.value / 10f);
+
         }
 
 }
@@ -362,7 +405,15 @@ public static void patch_OnOpen(UIOptionWindow __instance)
 
                 UnityEngine.UI.Slider slider = farRenderSlider.GetComponent<Slider>();
                 slider.maxValue = 10f * 10; // can only set whole numbers, so devide by 10 to get float value back
-                slider.value = 10.0f;
+                slider.value = RenderDistConfEntry.Value * 10;
+                if(slider.value <= 0)
+                {
+                        slider.value = 1;
+                }
+                else if(slider.value > 100)
+                {
+                        slider.value = 100;
+                }
                 //slider.stepSize = 0.1f; // does not work as its write protected
 
                 farRenderSlider.GetComponentInChildren<Text>().text = ((float)slider.value / 10f).ToString("0.0");
@@ -375,6 +426,8 @@ public static void patch_OnOpen(UIOptionWindow __instance)
                 UnityEngine.UI.Slider slider = farRenderSlider.GetComponent<Slider>();
                 farRenderSlider.GetComponentInChildren<Text>().text = ((float)slider.value / 10f).ToString("0.0");
                 farRender.GetComponent<Text>().text = "Planet Render Distance Multiplier";
+
+                RenderDistConfEntry.Value = ((float)slider.value / 10f);
 
         }
 
@@ -428,20 +481,7 @@ public static bool patchGetNearestStarPlanet(GameData __instance, ref StarData n
         }
         else if (nearestPlanet == null)
         {
-                double num5 = num2; // this is vanilla
-
-                try
-                {
-                        UnityEngine.UI.Slider slider = farRenderSlider.GetComponent<Slider>();
-                        if (slider != null && slider.gameObject != null) // im checking the wrong thing here i guess
-                        {
-                                num5 = num2 * ((float)slider.value / 10f);
-                        }
-                }
-                catch (NullReferenceException e)
-                {
-                        // this should only happen in main menu
-                }
+                double num5 = num2 * RenderDistConfEntry.Value;
 
                 int num6 = 0;
                 PlanetData fallbackGas = null;
