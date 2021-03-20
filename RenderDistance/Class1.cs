@@ -6,7 +6,6 @@ using System.Security;
 using System.Security.Permissions;
 using System.Collections.Generic;
 using UnityEngine.UI;
-using UnityEngine.EventSystems;
 using System.Reflection.Emit;
 using System.Reflection;
 using BepInEx.Configuration;
@@ -16,13 +15,14 @@ using BepInEx.Configuration;
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.8")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.9")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
 internal static GameObject dofblur, dofblurSlider, farRender, farRenderSlider;
 internal static PlanetData remoteViewPlanet;
 internal static int origPlanetId = -1;
+internal static int origStarId = -1;
 
 internal static Vector3 origPosVec3 = Vector3.zero;
 internal static VectorLF3 origPos = VectorLF3.zero;
@@ -64,7 +64,7 @@ private static void tpPlayer(PlanetData dest, bool hidePlayer)
                 GameMain.data.mainPlayer.uPosition = dest.uPosition + VectorLF3.unit_z * (double)dest.realRadius;
         }
 
-        if(dest != null)
+        if (dest != null)
         {
                 GameMain.data.ArrivePlanet(dest);
         }
@@ -227,6 +227,7 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
                 if(origPlanetId == -1 && GameMain.data.localPlanet != null && origPos == VectorLF3.zero && GameMain.mainPlayer.movementState != EMovementState.Sail)
                 {
                         origPlanetId = GameMain.data.localPlanet.id;
+                        origStarId = GameMain.localStar.id;
 
                         origPos = GameMain.data.mainPlayer.uPosition;
                         origPosVec3 = GameMain.data.mainPlayer.position;
@@ -259,8 +260,8 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
 
 }
 
-[HarmonyPostfix, HarmonyPatch(typeof(UIGlobemap), "_OnClose")]
-public static void patch__OnClose()
+[HarmonyPrefix, HarmonyPatch(typeof(UIGlobemap), "_OnClose")]
+public static bool patch__OnClose()
 {
 
         Player mainPlayer = GameMain.mainPlayer;
@@ -268,7 +269,7 @@ public static void patch__OnClose()
         if (mainPlayer != null)
         {
 
-                StarData localStar = GameMain.data.localStar;
+                StarData localStar = GameMain.galaxy.StarById(origStarId);
 
                 if (localStar != null && origPlanetId != -1)
                 {
@@ -278,6 +279,10 @@ public static void patch__OnClose()
                                 if (localStar.planets[i].id == origPlanetId)
                                 {
                                         tpPlayer(localStar.planets[i], false);
+                                        while (localStar.planets[i].loading)
+                                        {
+                                                PlanetModelingManager.Update();
+                                        }
 
                                         break;
                                 }
@@ -303,6 +308,8 @@ public static void patch__OnClose()
 
         }
 
+        return true;
+
 }
 
 [HarmonyPostfix, HarmonyPatch(typeof(PlanetData), "NotifyFactoryLoaded")]
@@ -311,14 +318,34 @@ public static void patch_NotifyFactoryLoaded(PlanetData __instance)
         if(__instance.id == origPlanetId)
         {
                 origPlanetId = -1;
+                origStarId = -1;
+
+                // so weird that returning from a planet of another system destroys theese. i dont feel food with this.
+                GameMain.mainPlayer.controller.enabled = true;
+                GameMain.mainPlayer.animator.enabled = true;
+                GameMain.mainPlayer.audio.footsteps.enabled = true;
+                GameMain.mainPlayer.audio.enabled = true;
+                GameMain.mainPlayer.effect.enabled = true;
+
+                GameMain.mainPlayer.controller.gameData = GameMain.data;
+                GameMain.mainPlayer.controller.player = GameMain.mainPlayer;
+                GameMain.mainPlayer.animator.player = GameMain.mainPlayer;
+                GameMain.mainPlayer.audio.player = GameMain.mainPlayer;
+                GameMain.mainPlayer.audio.footsteps.player = GameMain.mainPlayer;
+                GameMain.mainPlayer.effect.player = GameMain.mainPlayer;
         }
 }
 
-[HarmonyPostfix, HarmonyPatch(typeof(UIGlobemap), "FadeIn")]
-public static void patch_FadeIn()
+[HarmonyPrefix, HarmonyPatch(typeof(UIGlobemap), "FadeIn")]
+public static bool patch_FadeIn()
 {
 
-        Traverse.Create(GameMain.data).Property("localPlanet").GetValue<PlanetData>().LoadFactory();
+        while (GameMain.localPlanet.loading)
+        {
+                PlanetModelingManager.Update();
+        }
+        //Traverse.Create(GameMain.data).Property("localPlanet").GetValue<PlanetData>().LoadFactory();
+        return true;
 
 }
 

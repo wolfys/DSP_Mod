@@ -49,3 +49,6 @@ It will also allow you to view remote planets in the current solar system in Pla
 - added a config option to make the render distance settings slider persistent.
 - fixed a bug that produced an error when you were in remote planet view while mining something by hand or walking somewhere (thanks again to cdeath-zz)
 - fixed some random teleportation bugs and breaking out of sailing mode bugs
+
+### 0.6.9
+- fixed some bugs that prevented you from using "remote planet view" on planets in other star systems (thanks to wingless and Nordblum for reporting this to me)
