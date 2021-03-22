@@ -52,3 +52,9 @@ It will also allow you to view remote planets in the current solar system in Pla
 
 ### 0.6.9
 - fixed some bugs that prevented you from using "remote planet view" on planets in other star systems (thanks to wingless and Nordblum for reporting this to me)
+
+### 0.7.0
+- fixed a bug that would teleport the player into space
+- fixed a bug that would prevent you from using the new wheel in the starmap
+- added a config option to restrict access to ILS/PLS in remote planet view mode and set it to your needs
+- added a config option to toggle remote planet view mode on/off

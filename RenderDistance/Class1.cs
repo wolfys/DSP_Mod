@@ -15,7 +15,7 @@ using BepInEx.Configuration;
 
 namespace DSP_RenderDistance
 {
-[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.6.9")]
+[BepInPlugin("com.sp00ktober.DSPMods", "RenderDistance", "0.7.0")]
 public class DSP_RenderDistance : BaseUnityPlugin
 {
 
@@ -35,7 +35,19 @@ internal static bool needUpdateRot = false;
 internal static EMovementState origMoveState = EMovementState.Walk;
 internal static OrderNode currentOrder = null;
 
+internal static bool exitedGlobalView = false;
+internal static PlanetData starmapSelectedPlanet = null;
+
+private static ConfigFile customConfig {
+        get; set;
+}
 public static ConfigEntry<float> RenderDistConfEntry {
+        get; set;
+}
+public static ConfigEntry<int> AllowRemoteILSAccess {
+        get; set;
+}
+public static ConfigEntry<bool> EnableRemotePlanetView {
         get; set;
 }
 
@@ -43,12 +55,23 @@ public void Awake()
 {
 
         Harmony.CreateAndPatchAll(typeof(DSP_RenderDistance));
-        RenderDistConfEntry = Config.Bind<float>(
+
+        customConfig = new ConfigFile(Paths.ConfigPath + "\\RenderDistance.cfg", true);
+        RenderDistConfEntry = customConfig.Bind<float>(
                 "RenderDistanceMultiplier",
                 "Multiplier",
                 1.0f,
                 "The multiplier to use for planet render distance");
-
+        AllowRemoteILSAccess = customConfig.Bind<int>(
+                "RemoteStorage",
+                "Toggle",
+                1,
+                "If set to 0 it will allow to access any ILS/PLS on any planet. If set to 1 it will restrict that to the local solar system, if set to 2 it will restrict to the local planet (vanilla)");
+        EnableRemotePlanetView = customConfig.Bind<bool>(
+                "RemotePlanetView",
+                "Toggle",
+                true,
+                "If set to true you will be able to enter planet view mode for any planet. If set to false you will have this feature disabled.");
 }
 
 private static void tpPlayer(PlanetData dest, bool hidePlayer)
@@ -100,6 +123,21 @@ private static int findPlanet(int id, StarData star)
 
         return -1;
 
+}
+
+[HarmonyPrefix, HarmonyPatch(typeof(UIGame), "OpenStationWindow")]
+public static bool patch_UIStationWindow_OnOpen(UIGame __instance)
+{
+        customConfig.Reload();
+        if (AllowRemoteILSAccess.Value == 1 && origStarId != -1 && GameMain.localStar.id != origStarId)
+        {
+                return false;
+        }
+        else if(AllowRemoteILSAccess.Value == 2 && origPlanetId != -1 && GameMain.localPlanet.id != origPlanetId)
+        {
+                return false;
+        }
+        return true;
 }
 
 [HarmonyTranspiler, HarmonyPatch(typeof(PlayerOrder), "GameTick")]
@@ -206,6 +244,25 @@ public static void patch_UpdatePhysicsDirect(PlayerController __instance)
 [HarmonyPostfix, HarmonyPatch(typeof(UIStarmap), "OnPlanetClick")]
 public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet planet)
 {
+        if(__instance.focusPlanet != null && EnableRemotePlanetView.Value)
+        {
+                starmapSelectedPlanet = planet.planet;
+        }
+        else
+        {
+                starmapSelectedPlanet = null;
+        }
+}
+
+[HarmonyPostfix, HarmonyPatch(typeof(UIStarmap), "OnStarClick")]
+public static void patch_OnStarClick(UIStarmap __instance, UIStarmapStar star)
+{
+        starmapSelectedPlanet = null;
+}
+
+[HarmonyPostfix, HarmonyPatch(typeof(UIStarmap), "OnCursorFunction2Click")]
+public static void patch_OnCursorFunction2Click(UIStarmap __instance, int obj)
+{
 
         if(GameMain.data.mainPlayer.mecha.idleDroneCount != GameMain.data.mainPlayer.mecha.droneCount)
         {
@@ -214,7 +271,7 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
         }
 
         UIGame ui = UIRoot.instance.uiGame;
-        if (ui != null && planet.planet != null)
+        if (ui != null && starmapSelectedPlanet != null)
         {
 
                 OrderNode order = GameMain.mainPlayer.orders.currentOrder;
@@ -248,10 +305,12 @@ public static void patch_OnPlanetClick(UIStarmap __instance, UIStarmapPlanet pla
                         return;
                 }
 
-                remoteViewPlanet = planet.planet;
+                remoteViewPlanet = starmapSelectedPlanet;
                 origMoveState = GameMain.mainPlayer.movementState;
 
-                tpPlayer(planet.planet, true);
+                exitedGlobalView = false;
+
+                tpPlayer(starmapSelectedPlanet, true);
 
                 __instance._OnClose();
                 ui.globemap.FadeIn();
@@ -306,6 +365,33 @@ public static bool patch__OnClose()
                 origPos = VectorLF3.zero;
                 origPosVec3 = Vector3.zero;
 
+                exitedGlobalView = true;
+
+                // if we remote planet view the origin planet after doing that for another planet
+                // and the factory is loaded once we exit the planet view
+                // we still need to reset theese but it will not get done by NotifyFactoryLoaded()
+                // because we do not know there if the player actually wants to exit the planet view mode
+                // or return to star map
+                if(GameMain.localPlanet != null && GameMain.localPlanet.id == origPlanetId && GameMain.localPlanet.factoryLoaded)
+                {
+                        origPlanetId = -1;
+                        origStarId = -1;
+
+                        // so weird that returning from a planet of another system destroys theese. i dont feel food with this.
+                        GameMain.mainPlayer.controller.enabled = true;
+                        GameMain.mainPlayer.animator.enabled = true;
+                        GameMain.mainPlayer.audio.footsteps.enabled = true;
+                        GameMain.mainPlayer.audio.enabled = true;
+                        GameMain.mainPlayer.effect.enabled = true;
+
+                        GameMain.mainPlayer.controller.gameData = GameMain.data;
+                        GameMain.mainPlayer.controller.player = GameMain.mainPlayer;
+                        GameMain.mainPlayer.animator.player = GameMain.mainPlayer;
+                        GameMain.mainPlayer.audio.player = GameMain.mainPlayer;
+                        GameMain.mainPlayer.audio.footsteps.player = GameMain.mainPlayer;
+                        GameMain.mainPlayer.effect.player = GameMain.mainPlayer;
+                }
+
         }
 
         return true;
@@ -315,7 +401,7 @@ public static bool patch__OnClose()
 [HarmonyPostfix, HarmonyPatch(typeof(PlanetData), "NotifyFactoryLoaded")]
 public static void patch_NotifyFactoryLoaded(PlanetData __instance)
 {
-        if(__instance.id == origPlanetId)
+        if(__instance.id == origPlanetId && exitedGlobalView)
         {
                 origPlanetId = -1;
                 origStarId = -1;
