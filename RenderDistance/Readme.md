@@ -58,3 +58,6 @@ It will also allow you to view remote planets in the current solar system in Pla
 - fixed a bug that would prevent you from using the new wheel in the starmap
 - added a config option to restrict access to ILS/PLS in remote planet view mode and set it to your needs
 - added a config option to toggle remote planet view mode on/off
+
+### 0.7.1 by Wolfys
+- fixed working for DSP 0.10.28.21014
